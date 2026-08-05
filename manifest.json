@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "SampleTap",
+  "version": "1.0.0",
+  "description": "samplefocus.com のサンプルカードに赤いダウンロードボタンを足し、試聴中の音源をそのまま保存します。",
+  "permissions": ["downloads"],
+  "host_permissions": ["https://samplefocus.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://samplefocus.com/*"],
+      "js": ["hook.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://samplefocus.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

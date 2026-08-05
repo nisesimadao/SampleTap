@@ -1,0 +1,79 @@
+.sfdl-btn {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  margin: 0 0 0 8px;
+  vertical-align: middle;
+  border: none;
+  border-radius: 50%;
+  background: #e11d1d;
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  transition: background-color 0.15s ease, transform 0.1s ease;
+  flex: 0 0 auto;
+  line-height: 0;
+}
+
+.sfdl-btn:hover {
+  background: #f43f3f;
+}
+
+.sfdl-btn:active {
+  transform: scale(0.92);
+}
+
+.sfdl-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  display: block;
+  pointer-events: none;
+}
+
+.sfdl-btn[data-sfdl-state='busy'] {
+  background: #b91616;
+  cursor: progress;
+}
+
+.sfdl-btn[data-sfdl-state='busy'] svg {
+  animation: sfdl-pulse 0.9s ease-in-out infinite;
+}
+
+.sfdl-btn[data-sfdl-state='done'] {
+  background: #17a34a;
+}
+
+.sfdl-btn[data-sfdl-state='error'] {
+  background: #7a1010;
+}
+
+@keyframes sfdl-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 0.35;
+    transform: translateY(2px);
+  }
+}
+
+/* カード直下にしか置けなかった場合の保険 */
+.sfdl-host {
+  position: relative;
+}
+
+.sfdl-host > .sfdl-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 20;
+  margin: 0;
+}
