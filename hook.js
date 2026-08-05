@@ -1,142 +1,193 @@
 /**
  * hook.js — ページ本体(MAIN world)で動く。
- * SampleFocus のプレイヤーが読み込むプレビュー音源の URL を横取りして
- * content script (ISOLATED world) に postMessage で流す。
  *
- * DOM のクラス名に依存しないので、サイト側のマークアップが変わっても壊れにくい。
+ * SampleFocus は各サンプルの mp3 URL を、React on Rails が吐く
+ * <script type="application/json"> のペイロードに `sample_mp3_url` として
+ * 最初から埋め込んでいる。つまり再生しなくても正解の URL が分かる。
+ *
+ * ここではその索引を作り、content script からの問い合わせ（slug / sample id）に
+ * 答える。ページ送りやフィルタで後から来る分は fetch/XHR のレスポンスを見て
+ * 足し、それでも無ければ React の fiber から拾う。
+ *
+ * content script (ISOLATED world) からは page のプロパティ（__reactFiber$… 等）が
+ * 見えないので、この係だけは MAIN world に居る必要がある。
  */
 (() => {
   if (window.__sfdlHookInstalled) return;
   window.__sfdlHookInstalled = true;
 
-  const AUDIO_EXT = /\.(mp3|wav|ogg|oga|m4a|aac|flac|opus|webm)(\?|#|$)/i;
-  const seenMedia = new Set();
+  const bySlug = new Map();
+  const byId = new Map();
 
-  function report(raw, source) {
-    if (!raw || typeof raw !== 'string') return;
-    if (raw.startsWith('data:')) return;
-    let url;
-    try {
-      url = new URL(raw, location.href).href;
-    } catch (_) {
-      return;
-    }
-    window.postMessage({ __sfdl: 'page->cs', type: 'AUDIO_SRC', url, source }, location.origin);
+  function addEntry(o) {
+    if (!o || typeof o.sample_mp3_url !== 'string') return false;
+    const e = {
+      mp3: o.sample_mp3_url,
+      name: typeof o.name === 'string' ? o.name : '',
+      slug: typeof o.slug === 'string' ? o.slug : '',
+      id: o.id != null ? String(o.id) : ''
+    };
+    if (e.slug) bySlug.set(e.slug, e);
+    if (e.id) byId.set(e.id, e);
+    return true;
   }
 
-  function track(el) {
-    if (el instanceof HTMLMediaElement) seenMedia.add(el);
+  // 任意の JSON から sample_mp3_url を持つオブジェクトを掘り出す
+  function harvest(obj, depth) {
+    if (!obj || typeof obj !== 'object' || depth > 8) return 0;
+    let n = 0;
+    if (Array.isArray(obj)) {
+      for (const v of obj) n += harvest(v, depth + 1);
+      return n;
+    }
+    if (addEntry(obj)) n++;
+    for (const v of Object.values(obj)) {
+      if (v && typeof v === 'object') n += harvest(v, depth + 1);
+    }
+    return n;
   }
 
-  // --- 1) <audio>/<video> の src セッター ---------------------------------
-  try {
-    const desc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
-    if (desc && desc.set) {
-      Object.defineProperty(HTMLMediaElement.prototype, 'src', {
-        configurable: true,
-        enumerable: desc.enumerable,
-        get() {
-          return desc.get.call(this);
-        },
-        set(value) {
-          track(this);
-          report(value, 'media.src');
-          return desc.set.call(this, value);
-        }
-      });
-    }
-  } catch (_) {}
+  /* --- 1) 埋め込み JSON（初期表示ぶん） ---------------------------------- */
+  const scannedScripts = new WeakSet();
 
-  // --- 2) setAttribute('src', ...) 経由 -----------------------------------
-  try {
-    const origSetAttribute = Element.prototype.setAttribute;
-    Element.prototype.setAttribute = function (name, value) {
-      if (this instanceof HTMLMediaElement && String(name).toLowerCase() === 'src') {
-        track(this);
-        report(value, 'setAttribute');
-      } else if (this instanceof HTMLSourceElement && String(name).toLowerCase() === 'src') {
-        report(value, 'source');
-      }
-      return origSetAttribute.apply(this, arguments);
-    };
-  } catch (_) {}
+  function scanEmbeddedJson() {
+    document.querySelectorAll('script[type="application/json"]').forEach((s) => {
+      if (scannedScripts.has(s)) return;
+      scannedScripts.add(s);
+      const t = s.textContent;
+      if (!t || t.indexOf('sample_mp3_url') === -1) return;
+      try {
+        harvest(JSON.parse(t), 0);
+      } catch (_) {}
+    });
+  }
 
-  // --- 3) play() 呼び出し時 -----------------------------------------------
-  try {
-    const origPlay = HTMLMediaElement.prototype.play;
-    HTMLMediaElement.prototype.play = function () {
-      track(this);
-      report(this.currentSrc || this.src, 'play()');
-      return origPlay.apply(this, arguments);
-    };
-  } catch (_) {}
+  scanEmbeddedJson();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', scanEmbeddedJson);
+  }
 
-  // --- 4) new Audio(url) ---------------------------------------------------
-  try {
-    const OrigAudio = window.Audio;
-    if (typeof OrigAudio === 'function') {
-      const PatchedAudio = function Audio(src) {
-        const el = src === undefined ? new OrigAudio() : new OrigAudio(src);
-        track(el);
-        if (src) report(src, 'new Audio');
-        return el;
-      };
-      PatchedAudio.prototype = OrigAudio.prototype;
-      window.Audio = PatchedAudio;
-    }
-  } catch (_) {}
-
-  // --- 5) DOM 内メディアの loadstart（キャプチャ段階で拾う） ---------------
-  document.addEventListener(
-    'loadstart',
-    (e) => {
-      if (e.target instanceof HTMLMediaElement) {
-        track(e.target);
-        report(e.target.currentSrc || e.target.src, 'loadstart');
-      }
-    },
-    true
-  );
-
-  // --- 6) Web Audio 系（fetch / XHR で arraybuffer を取る実装向け） --------
+  /* --- 2) 後から来るぶん（ページ送り・フィルタ・無限スクロール） ---------- */
   try {
     const origFetch = window.fetch;
     window.fetch = function (input, init) {
-      try {
-        const u = typeof input === 'string' ? input : input && input.url;
-        if (u && AUDIO_EXT.test(String(u))) report(u, 'fetch');
-      } catch (_) {}
-      return origFetch.apply(this, arguments);
+      const p = origFetch.apply(this, arguments);
+      return p.then((res) => {
+        try {
+          const ct = res.headers && res.headers.get && res.headers.get('content-type');
+          if (ct && ct.indexOf('json') !== -1) {
+            res
+              .clone()
+              .json()
+              .then((j) => harvest(j, 0))
+              .catch(() => {});
+          }
+        } catch (_) {}
+        return res;
+      });
     };
   } catch (_) {}
 
   try {
     const origOpen = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function (method, url) {
-      try {
-        if (url && AUDIO_EXT.test(String(url))) report(url, 'xhr');
-      } catch (_) {}
+    XMLHttpRequest.prototype.open = function () {
+      this.addEventListener('load', function () {
+        try {
+          const t = this.responseType;
+          if (t && t !== 'text' && t !== 'json') return;
+          const body = t === 'json' ? this.response : this.responseText;
+          if (!body) return;
+          if (typeof body === 'string') {
+            if (body.indexOf('sample_mp3_url') === -1) return;
+            harvest(JSON.parse(body), 0);
+          } else {
+            harvest(body, 0);
+          }
+        } catch (_) {}
+      });
       return origOpen.apply(this, arguments);
     };
   } catch (_) {}
 
-  // --- content script からの指示 ------------------------------------------
+  /* --- 3) 最後の砦: React fiber から拾う -------------------------------- */
+  function matches(o, slug, id) {
+    if (!o || typeof o.sample_mp3_url !== 'string') return false;
+    if (slug && o.slug === slug) return true;
+    if (id && o.id != null && String(o.id) === id) return true;
+    return false;
+  }
+
+  function scanProps(obj, slug, id, depth) {
+    if (!obj || typeof obj !== 'object' || depth > 6) return null;
+    if (Array.isArray(obj)) {
+      for (const v of obj) {
+        const r = scanProps(v, slug, id, depth + 1);
+        if (r) return r;
+      }
+      return null;
+    }
+    if (matches(obj, slug, id)) return obj;
+    for (const v of Object.values(obj)) {
+      if (v && typeof v === 'object') {
+        const r = scanProps(v, slug, id, depth + 1);
+        if (r) return r;
+      }
+    }
+    return null;
+  }
+
+  function fromFiber(el, slug, id) {
+    if (!el) return null;
+    const key = Object.keys(el).find((k) => k.indexOf('__reactFiber$') === 0);
+    if (!key) return null;
+    let node = el[key];
+    let hops = 0;
+    while (node && hops++ < 30) {
+      const props = node.memoizedProps || node.pendingProps;
+      const hit = scanProps(props, slug, id, 0);
+      if (hit) {
+        addEntry(hit);
+        return hit;
+      }
+      node = node.return;
+    }
+    return null;
+  }
+
+  /* --- content script との窓口 ------------------------------------------ */
+  function reply(reqId, entry) {
+    window.postMessage(
+      {
+        __sfdl: 'page->cs',
+        type: 'RESOLVED',
+        reqId,
+        url: entry ? entry.sample_mp3_url || entry.mp3 : null,
+        name: entry ? entry.name || '' : ''
+      },
+      location.origin
+    );
+  }
+
   window.addEventListener('message', (e) => {
     if (e.source !== window) return;
     const d = e.data;
     if (!d || d.__sfdl !== 'cs->page') return;
 
-    if (d.type === 'PAUSE_ALL') {
-      const all = new Set(seenMedia);
-      document.querySelectorAll('audio, video').forEach((m) => all.add(m));
-      all.forEach((m) => {
-        try {
-          if (!m.paused) {
-            m.pause();
-            m.currentTime = 0;
-          }
-        } catch (_) {}
-      });
+    if (d.type === 'RESOLVE') {
+      const slug = d.slug || '';
+      const id = d.id ? String(d.id) : '';
+
+      let entry = (slug && bySlug.get(slug)) || (id && byId.get(id)) || null;
+
+      if (!entry) {
+        scanEmbeddedJson();
+        entry = (slug && bySlug.get(slug)) || (id && byId.get(id)) || null;
+      }
+      if (!entry && d.reqId != null) {
+        const el = document.querySelector('[data-sfdl-req="' + d.reqId + '"]');
+        entry = fromFiber(el, slug, id);
+      }
+      reply(d.reqId, entry);
     }
   });
 })();

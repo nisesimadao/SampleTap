@@ -1,79 +1,47 @@
-.sfdl-btn {
-  display: inline-flex !important;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
-  margin: 0 0 0 8px;
-  vertical-align: middle;
-  border: none;
-  border-radius: 50%;
-  background: #e11d1d;
-  color: #fff;
-  cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-  transition: background-color 0.15s ease, transform 0.1s ease;
-  flex: 0 0 auto;
-  line-height: 0;
+/* サイト自身のダウンロードボタンを複製して使うので、寸法・余白・角丸・波紋は
+   本家のまま。ここで変えるのは色と、行末の角丸の付け替えだけ。 */
+
+.sf-card-action > .sfdl-btn,
+.sf-card-action > .sfdl-btn i {
+  color: #ff5252 !important;
 }
 
-.sfdl-btn:hover {
-  background: #f43f3f;
+.sf-card-action > .sfdl-btn:hover,
+.sf-card-action > .sfdl-btn:hover i {
+  color: #ff1744 !important;
 }
 
-.sfdl-btn:active {
-  transform: scale(0.92);
+/* 3つ並ぶので、右下の角丸は本家のダウンロードボタンから末尾のこちらへ移す */
+.sf-card-action > [aria-label='Download']:not(:last-child) {
+  border-bottom-right-radius: 0 !important;
 }
 
-.sfdl-btn svg {
-  width: 16px;
-  height: 16px;
-  fill: currentColor;
-  display: block;
-  pointer-events: none;
+.sf-card-action > .sfdl-btn:last-child {
+  border-bottom-right-radius: 5px !important;
 }
 
-.sfdl-btn[data-sfdl-state='busy'] {
-  background: #b91616;
+/* 状態表示 */
+.sf-card-action > .sfdl-btn[data-sfdl-state='busy'] {
   cursor: progress;
 }
 
-.sfdl-btn[data-sfdl-state='busy'] svg {
-  animation: sfdl-pulse 0.9s ease-in-out infinite;
+.sf-card-action > .sfdl-btn[data-sfdl-state='done'],
+.sf-card-action > .sfdl-btn[data-sfdl-state='done'] i {
+  color: #26a69a !important;
 }
 
-.sfdl-btn[data-sfdl-state='done'] {
-  background: #17a34a;
+.sf-card-action > .sfdl-btn[data-sfdl-state='error'],
+.sf-card-action > .sfdl-btn[data-sfdl-state='error'] i {
+  color: #b71c1c !important;
 }
 
-.sfdl-btn[data-sfdl-state='error'] {
-  background: #7a1010;
-}
-
-@keyframes sfdl-pulse {
-  0%,
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  50% {
-    opacity: 0.35;
-    transform: translateY(2px);
+/* Font Awesome の fa-spin が無い環境向けの保険 */
+@keyframes sfdl-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
-/* カード直下にしか置けなかった場合の保険 */
-.sfdl-host {
-  position: relative;
-}
-
-.sfdl-host > .sfdl-btn {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 20;
-  margin: 0;
+.sf-card-action > .sfdl-btn[data-sfdl-state='busy'] i {
+  animation: sfdl-spin 1s linear infinite;
 }
